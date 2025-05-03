@@ -1,42 +1,56 @@
 import { NextResponse } from 'next/server';
-import * as ReactDOMServer from 'react-dom/server';
 import { EmailTemplate } from '../../post-call-webhook-email';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
+
+// Initialize Resend with API key (will read from process.env.RESEND_API_KEY)
+const resend = new Resend();
 
 export async function POST(req: Request) {
   try {
-    // Parse the request body for transcript and recipient
+    console.log('ElevenLabs webhook received');
+    
+    // Validate API key exists
+    if (!process.env.RESEND_API_KEY) {
+      console.error('RESEND_API_KEY is missing');
+    }
+    
+    // Parse the request body
     const body = await req.json();
+    console.log('Webhook payload received:', JSON.stringify(body));
+    
     const { transcript, to } = body;
-
-    // Render the React component to HTML string using ReactDOMServer
-    const emailComponent = EmailTemplate({ transcript });
-    const emailHtml = ReactDOMServer.renderToString(emailComponent);
-    console.log('Email HTML generated with length:', emailHtml.length);
-
-    // Set up Nodemailer SMTP transport
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.resend.com',
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: true, // true for 465, false for other ports
-      auth: {
-        user: process.env.SMTP_USER || 'resend',
-        pass: process.env.SMTP_PASS || process.env.RESEND_API_KEY,
-      },
-    });
-
-    // Send the email with HTML
-    const info = await transporter.sendMail({
-      from: process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev',
-      to: to || 'info@aisolutionshawaii.com',
-      subject: 'Your Conversational AI Agent is Ready!',
-      html: emailHtml,
-    });
-
-    console.log('Email sent successfully:', info);
-    return NextResponse.json({ success: true, info });
+    
+    // Default recipient if not provided
+    const recipient = to || 'info@aisolutionshawaii.com';
+    console.log('Sending email to:', recipient);
+    
+    // Default from email
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'info@aisolutionshawaii.com';
+    console.log('Sending from:', fromEmail);
+    
+    // Send email using Resend
+    try {
+      const data = await resend.emails.send({
+        from: fromEmail,
+        to: recipient,
+        subject: 'Your Conversational AI Agent is Ready!',
+        react: EmailTemplate({ transcript }),
+      });
+      
+      console.log('Email sent successfully:', data);
+      return NextResponse.json({ success: true, data });
+    } catch (resendError) {
+      console.error('Error sending email via Resend:', resendError);
+      return NextResponse.json({ 
+        error: 'Failed to send email', 
+        details: resendError instanceof Error ? resendError.message : String(resendError)
+      }, { status: 500 });
+    }
   } catch (error) {
-    console.error('Failed to send email:', error);
-    return NextResponse.json({ error: 'Failed to send email', details: error }, { status: 500 });
+    console.error('Failed to process webhook:', error);
+    return NextResponse.json({ 
+      error: 'Failed to process webhook', 
+      details: error instanceof Error ? error.message : String(error) 
+    }, { status: 500 });
   }
 } 
